@@ -41,6 +41,8 @@ class InterviewSession(MongoBase):
     status: SessionStatus = SessionStatus.pending
     company_snapshot_id: str | None = None
     question_ids: list[str] = Field(default_factory=list)
+    elevenlabs_agent_id: str | None = None
+    elevenlabs_conversation_id: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     started_at: datetime | None = None
     ended_at: datetime | None = None

@@ -5,3 +5,6 @@ pymongo
 httpx
 pydantic-settings
 PyJWT[crypto]
+pytest
+pytest-asyncio
+pytest-mock

@@ -5,7 +5,7 @@ import jwt
 from jwt import PyJWKClient
 from fastapi import Depends, Header, HTTPException, status
 
-from app.config import settings
+from config import settings
 
 
 def _jwks_url() -> str:
