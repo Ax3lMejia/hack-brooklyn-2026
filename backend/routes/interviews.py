@@ -16,6 +16,7 @@ from schemas.interviews import (
     SessionResponse,
 )
 from services.elevenlabs import create_interview_agent, get_signed_url, sync_transcript
+from services.feedback import generate_feedback
 from services.question_planner import plan_questions
 
 logger = logging.getLogger(__name__)
@@ -141,6 +142,7 @@ async def patch_session(
     clerk_user_id: str = Depends(require_auth),
 ):
     doc = _get_owned_session(session_id, clerk_user_id)
+    pre_update_status = doc.get("status")
 
     updates: dict = {}
 
@@ -165,14 +167,23 @@ async def patch_session(
 
     doc = db.sessions.find_one({"_id": ObjectId(session_id)})
 
-    # When a session completes, sync the ElevenLabs transcript in the background
+    _terminal = (SessionStatus.completed.value, SessionStatus.abandoned.value)
+    session_completed = (
+        body.status in (SessionStatus.completed, SessionStatus.abandoned)
+        and pre_update_status not in _terminal
+    )
+
+    # Sync ElevenLabs transcript when session ends (only if conversation was linked)
     conversation_id = doc.get("elevenlabs_conversation_id")
-    session_completed = body.status in (SessionStatus.completed, SessionStatus.abandoned)
     if session_completed and conversation_id:
         started_at = doc.get("started_at")
         background_tasks.add_task(
             _sync_transcript_background, session_id, conversation_id, started_at
         )
+
+    # Generate feedback whenever a session ends (with or without ElevenLabs)
+    if session_completed:
+        background_tasks.add_task(generate_feedback, session_id)
 
     return _session_to_response(doc)
 
