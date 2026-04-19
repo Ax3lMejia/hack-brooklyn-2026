@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import json
 import logging
@@ -186,7 +187,13 @@ async def _run_feedback_pipeline(session_id: str) -> None:
         return
 
     question_ids = session_doc.get("question_ids", [])
-    questions = list(db.questions.find({"_id": {"$in": [ObjectId(qid) for qid in question_ids]}}))
+    valid_oids = []
+    for qid in question_ids:
+        try:
+            valid_oids.append(ObjectId(qid))
+        except Exception:
+            pass
+    questions = list(db.questions.find({"_id": {"$in": valid_oids}}))
     questions.sort(key=lambda q: q.get("order", 0))
 
     all_segments = list(db.transcripts.find({"session_id": session_id, "is_partial": False}))
@@ -204,18 +211,15 @@ async def _run_feedback_pipeline(session_id: str) -> None:
         for doc in db.code_submissions.find({"session_id": session_id, "is_final": True})
     }
 
-    # --- Score each question ---
-    per_question_results: list[dict] = []
+    # --- Score all questions concurrently ---
+    qids = [str(q["_id"]) for q in questions]
+    per_question_results: list[dict] = await asyncio.gather(*[
+        score_question(q, segments_by_question.get(str(q["_id"]), []), code_submissions.get(str(q["_id"])))
+        for q in questions
+    ])
+
     question_feedback_list: list[QuestionFeedback] = []
-
-    for q in questions:
-        qid = str(q["_id"])
-        segments = segments_by_question.get(qid, [])
-        code_sub = code_submissions.get(qid)
-        result = await score_question(q, segments, code_sub)
-
-        per_question_results.append(result)
-
+    for q, qid, result in zip(questions, qids, per_question_results):
         evidence = [
             EvidenceSpan(
                 transcript_segment_id="",
@@ -224,7 +228,6 @@ async def _run_feedback_pipeline(session_id: str) -> None:
             )
             for quote in result.get("evidence_quotes", [])[:3]
         ]
-
         question_feedback_list.append(QuestionFeedback(
             question_id=qid,
             score=result["score"],
